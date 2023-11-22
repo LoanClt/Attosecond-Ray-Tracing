@@ -1,0 +1,69 @@
+% Définir les coordonnées du point source
+source = [-10, 0];
+
+% Définir les propriétés de l'arc de cercle concave
+centreMiroir = [0, 0];
+rayonMiroir = 3; % La moitié du diamètre
+angleDebut = -pi/4; % Angle de début de l'arc
+angleFin = pi/4; % Angle de fin de l'arc
+
+% Tracer l'arc de cercle concave
+theta = linspace(angleDebut, angleFin, 100);
+xMiroir = centreMiroir(1) + rayonMiroir * cos(theta);
+yMiroir = centreMiroir(2) + rayonMiroir * sin(theta);
+
+figure;
+plot(xMiroir, yMiroir, 'k', 'LineWidth', 2);
+hold on;
+
+% Tracer les rayons du point source à l'arc de cercle concave, les rayons réfléchis et les normales
+numRayons = 10;
+
+for i = 1:numRayons
+    % Angle du rayon par rapport à l'axe x
+    angleRayon = angleDebut + (i - 1) * (angleFin - angleDebut) / (numRayons - 1);
+    
+    % Coordonnées du point d'intersection avec l'arc de cercle concave
+    xIntersection = centreMiroir(1) + rayonMiroir * cos(angleRayon);
+    yIntersection = centreMiroir(2) + rayonMiroir * sin(angleRayon);
+    
+    % Tracer le rayon incident
+    plot([source(1), xIntersection], [source(2), yIntersection], 'b');
+    
+    % Tracer la normale (segment vert)
+    quiver(xIntersection, yIntersection, cos(angleRayon), sin(angleRayon), 'g', 'LineWidth', 1, 'MaxHeadSize', 0.5);
+    
+    % Calculer et tracer le rayon réfléchi
+    normalMiroir = [cos(angleRayon), sin(angleRayon)];
+    directionIncidente = normalize([xIntersection - source(1), yIntersection - source(2)]);
+    directionReflechie = reflect(directionIncidente, normalMiroir);
+    
+    % Coordonnées du point réfléchi sur l'arc de cercle concave
+    xReflechi = xIntersection + 2 * rayonMiroir * directionReflechie(1);
+    yReflechi = yIntersection + 2 * rayonMiroir * directionReflechie(2);
+    
+    % Tracer le rayon réfléchi
+    plot([xIntersection, xReflechi], [yIntersection, yReflechi], 'r');
+end
+
+% Marquer le point source
+scatter(source(1), source(2), 'filled', 'MarkerEdgeColor', 'g', 'MarkerFaceColor', 'g');
+
+% Ajouter des étiquettes
+title('Simulation du tracé des rayons sur un arc de cercle concave avec normales');
+xlabel('Coordonnée X');
+ylabel('Coordonnée Y');
+axis equal;
+grid on;
+hold off;
+
+% Fonction pour normaliser un vecteur
+function normalizedVector = normalize(vector)
+    magnitude = norm(vector);
+    normalizedVector = vector / magnitude;
+end
+
+% Fonction pour calculer la réflexion d'un vecteur par rapport à une normale
+function reflectedVector = reflect(vector, normal)
+    reflectedVector = vector - 2 * dot(vector, normal) * normal;
+end

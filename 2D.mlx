@@ -1,10 +1,12 @@
-% Définir les coordonnées du point source
+
+
+% Definir les coordonnees du point source
 source = [-10, 0];
 
-% Définir les propriétés de l'arc de cercle concave
+% Definir les proprietes de l'arc de cercle concave
 centreMiroir = [0, 0];
-rayonMiroir = 3; % La moitié du diamètre
-angleDebut = -pi/4; % Angle de début de l'arc
+rayonMiroir = 3; % La moitie du diametre
+angleDebut = -pi/4; % Angle de debut de l'arc
 angleFin = pi/4; % Angle de fin de l'arc
 
 % Tracer l'arc de cercle concave
@@ -12,50 +14,127 @@ theta = linspace(angleDebut, angleFin, 100);
 xMiroir = centreMiroir(1) + rayonMiroir * cos(theta);
 yMiroir = centreMiroir(2) + rayonMiroir * sin(theta);
 
+c = 3e8;
+
 figure;
 plot(xMiroir, yMiroir, 'k', 'LineWidth', 2);
 hold on;
 
-% Tracer les rayons du point source à l'arc de cercle concave, les rayons réfléchis et les normales
-numRayons = 10;
+% Tracer les rayons du point source a l'arc de cercle concave, les rayons reflechis et les normales
+numRayons = 30;
+
+% Initialiser un vecteur pour stocker les coordonnees y des points reflechis en x = 1
+yReflechiEnX13 = zeros(1, numRayons);
+yReflechiEnX14 = zeros(1, numRayons);
+yReflechiEnX15 = zeros(1, numRayons);
+yReflechiEnXPlan = zeros(1, numRayons);
+
+%Initialisation de la distance
+distanceMoyenne = [];
+tempsMoyen = [];
+listeRayon = [1:numRayons];
+
+%Détermination du meilleur plan de focalisation
+xPlan = linspace(1,2,100);
+indexX = 1;
+distanceRayonsExtremaux = distanceRayonsEx(xPlan(indexX), angleDebut, angleFin, numRayons, centreMiroir, rayonMiroir, source);
+for i=2:length(xPlan)
+    distanceRayonsExtremauxPrime = distanceRayonsEx(xPlan(i), angleDebut, angleFin, numRayons, centreMiroir, rayonMiroir, source);
+    if distanceRayonsExtremauxPrime < distanceRayonsExtremaux
+        distanceRayonsExtremaux = distanceRayonsExtremauxPrime;
+        indexX = i;
+    end
+end
 
 for i = 1:numRayons
-    % Angle du rayon par rapport à l'axe x
+    % Angle du rayon par rapport a l'axe x
     angleRayon = angleDebut + (i - 1) * (angleFin - angleDebut) / (numRayons - 1);
     
-    % Coordonnées du point d'intersection avec l'arc de cercle concave
+    % Coordonnees du point d'intersection avec l'arc de cercle concave
     xIntersection = centreMiroir(1) + rayonMiroir * cos(angleRayon);
     yIntersection = centreMiroir(2) + rayonMiroir * sin(angleRayon);
     
     % Tracer le rayon incident
     plot([source(1), xIntersection], [source(2), yIntersection], 'b');
     
-    % Tracer la normale (segment vert)
-    quiver(xIntersection, yIntersection, cos(angleRayon), sin(angleRayon), 'g', 'LineWidth', 1, 'MaxHeadSize', 0.5);
-    
-    % Calculer et tracer le rayon réfléchi
+    % Calculer et tracer le rayon reflechi
     normalMiroir = [cos(angleRayon), sin(angleRayon)];
     directionIncidente = normalize([xIntersection - source(1), yIntersection - source(2)]);
     directionReflechie = reflect(directionIncidente, normalMiroir);
     
-    % Coordonnées du point réfléchi sur l'arc de cercle concave
+    % Coordonnees du point reflechi sur l'arc de cercle concave
     xReflechi = xIntersection + 2 * rayonMiroir * directionReflechie(1);
     yReflechi = yIntersection + 2 * rayonMiroir * directionReflechie(2);
     
-    % Tracer le rayon réfléchi
+    % Tracer le rayon reflechi
     plot([xIntersection, xReflechi], [yIntersection, yReflechi], 'r');
+    
+    % Stocker les coordonnees y des points reflechis en x = 1.5
+    xReflechiDroite = linspace(-2, 3, 1000);
+    m = (yReflechi-yIntersection)/(xReflechi-xIntersection);
+    b = yIntersection - m*xIntersection;
+    yReflechiDroite = m*xReflechiDroite + b;
+
+    [~, index] = min(abs(xReflechiDroite - 1.3));
+    yReflechiEnX13(i) = yReflechiDroite(index);
+
+    [~, index] = min(abs(xReflechiDroite - 1.4));
+    yReflechiEnX14(i) = yReflechiDroite(index);
+
+    [~, index] = min(abs(xReflechiDroite - 1.5));
+    yReflechiEnX15(i) = yReflechiDroite(index);
+
+    [~, index] = min(abs(xReflechiDroite - xPlan(indexX)));
+    yReflechiEnXPlan(i) = yReflechiDroite(index);
+
+    %Distance
+    xSource = source(1);
+    ySource = source(2);
+    distanceMoyenne = [distanceMoyenne, sqrt((xIntersection -xSource)^2 + (yIntersection - ySource)^2) + sqrt((yReflechiEnXPlan(i) - yIntersection)^2 + (xPlan(indexX) - xIntersection)^2)];
+    tempsMoyen = [tempsMoyen, (sqrt((xIntersection -xSource)^2 + (yIntersection - ySource)^2) + sqrt((yReflechiEnXPlan(i) - yIntersection)^2 + (xPlan(indexX) - xIntersection)^2))/c];
 end
+
+hold on
 
 % Marquer le point source
 scatter(source(1), source(2), 'filled', 'MarkerEdgeColor', 'g', 'MarkerFaceColor', 'g');
 
-% Ajouter des étiquettes
-title('Simulation du tracé des rayons sur un arc de cercle concave avec normales');
-xlabel('Coordonnée X');
-ylabel('Coordonnée Y');
+% Ajouter des etiquettes
+title('Simulation du trace des rayons sur un arc de cercle concave avec normales');
+xlabel('Coordonnee X');
+ylabel('Coordonnee Y');
 axis equal;
 grid on;
 hold off;
+
+MeilleurPlan = xPlan(indexX)
+
+% Creer une nouvelle figure pour le spot diagram
+figure;
+hold on
+scatter(ones(numRayons)*1.3, yReflechiEnX13, 'filled', "cyan");
+scatter(ones(numRayons)*1.4, yReflechiEnX14, 'filled', "red");
+scatter(ones(numRayons)*1.5, yReflechiEnX15, 'filled', "green");
+scatter(ones(numRayons)*xPlan(indexX), yReflechiEnXPlan, 'filled', "black");
+legend("x=1.3", "x=1.4", "x=1.5", "Meilleur plan")
+title('Spot Diagram pour différents plans');
+xlabel('Coordonnee X');
+ylabel('Coordonnee Y');
+axis equal;
+grid on;
+hold off
+
+% Temps de parcours
+figure;
+hold on
+scatter(listeRayon, tempsMoyen, 'filled');
+title('Temps de parcours de chaque rayons');
+ylabel("Temps d'arrivée (s)");
+xlabel('N° du rayon');
+grid on;
+hold off
+
+
 
 % Fonction pour normaliser un vecteur
 function normalizedVector = normalize(vector)
@@ -63,7 +142,37 @@ function normalizedVector = normalize(vector)
     normalizedVector = vector / magnitude;
 end
 
-% Fonction pour calculer la réflexion d'un vecteur par rapport à une normale
+% Fonction pour calculer la reflexion d'un vecteur par rapport a une normale
 function reflectedVector = reflect(vector, normal)
     reflectedVector = vector - 2 * dot(vector, normal) * normal;
+end
+
+function distanceRayons=distanceRayonsEx(x, angleDebut, angleFin, numRayons, centreMiroir, rayonMiroir, source)
+    yReflechiEnX = ones(1, numRayons);
+
+    for i = 1:numRayons
+        angleRayon = angleDebut + (i - 1) * (angleFin - angleDebut) / (numRayons - 1);
+            
+            % Coordonnees du point d'intersection avec l'arc de cercle concave
+        xIntersection = centreMiroir(1) + rayonMiroir * cos(angleRayon);
+        yIntersection = centreMiroir(2) + rayonMiroir * sin(angleRayon);
+            
+            % Calculer et tracer le rayon reflechi
+        normalMiroir = [cos(angleRayon), sin(angleRayon)];
+        directionIncidente = normalize([xIntersection - source(1), yIntersection - source(2)]);
+        directionReflechie = reflect(directionIncidente, normalMiroir);
+            
+            % Coordonnees du point reflechi sur l'arc de cercle concave
+        xReflechi = xIntersection + 2 * rayonMiroir * directionReflechie(1);
+        yReflechi = yIntersection + 2 * rayonMiroir * directionReflechie(2);
+        
+        xReflechiDroite = linspace(-2, 3, 1000);
+        m = (yReflechi-yIntersection)/(xReflechi-xIntersection);
+        b = yIntersection - m*xIntersection;
+        yReflechiDroite = m*xReflechiDroite + b;
+        
+        [~, index] = min(abs(xReflechiDroite - x));
+        yReflechiEnX(i) = yReflechiDroite(index);
+    end
+    distanceRayons = abs(min(yReflechiEnX) - max(yReflechiEnX));
 end

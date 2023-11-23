@@ -4,8 +4,8 @@ source = [-10, 0, 0];
 % Définir les propriétés de la demi-sphère concave
 centreMiroir = [0, 0, 0];
 rayonMiroir = 3; % Rayon de la demi-sphère concave
-angleDebut = -pi/4; % Angle de début de la demi-sphère
-angleFin = pi/4; % Angle de fin de la demi-sphère
+angleDebut = -pi/3; % Angle de début de la demi-sphère
+angleFin = pi/3; % Angle de fin de la demi-sphère
 
 % Tracer la demi-sphère concave
 theta = linspace(angleDebut, angleFin, 50);
@@ -19,11 +19,6 @@ figure;
 surf(xMiroir, yMiroir, zMiroir, 'FaceColor', 'b', 'EdgeColor', 'none', 'FaceAlpha', 0.5);
 hold on;
 
-% Variables pour stocker les positions des points de convergence
-positionsConvergenceX = [];
-positionsConvergenceY = [];
-positionsConvergenceZ = [];
-
 % Tracer les rayons du point source à la demi-sphère concave, les rayons réfléchis
 numRayons = 20;
 
@@ -35,9 +30,9 @@ for i = 1:numRayons
     
     % Assurer que certains rayons touchent le miroir à des coordonnées z négatives
     if mod(i, 2) == 0
-        zIntersection = centreMiroir(3) - 1; % Coordonnée z négative
+        zIntersection = centreMiroir(3); % Coordonnée z négative
     else
-        zIntersection = centreMiroir(3); % Coordonnée z nulle
+        %zIntersection = centreMiroir(3); % Coordonnée z nulle
     end
     
     % Tracer le rayon incident
@@ -56,17 +51,15 @@ for i = 1:numRayons
     % Tracer le rayon réfléchi
     plot3([xIntersection, xReflechi], [yIntersection, yReflechi], [zIntersection, zReflechi], 'r');
     
-    % Collecter les positions des points de convergence
-    positionsConvergenceX = [positionsConvergenceX, xReflechi];
-    positionsConvergenceY = [positionsConvergenceY, yReflechi];
-    positionsConvergenceZ = [positionsConvergenceZ, zReflechi];
+    % Tracer la normale locale au miroir (segment vert)
+    quiver3(xIntersection, yIntersection, zIntersection, normalMiroir(1), normalMiroir(2), normalMiroir(3), 'g', 'LineWidth', 1, 'MaxHeadSize', 0.5);
 end
 
 % Marquer le point source
 scatter3(source(1), source(2), source(3), 'filled', 'MarkerEdgeColor', 'g', 'MarkerFaceColor', 'g');
 
 % Ajouter des étiquettes
-title('Simulation du tracé des rayons sur une demi-sphère concave');
+title('Simulation du tracé des rayons sur une demi-sphère concave avec normales locales');
 xlabel('Coordonnée X');
 ylabel('Coordonnée Y');
 zlabel('Coordonnée Z');

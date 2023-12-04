@@ -1,0 +1,227 @@
+%GeoRaytracerLite: Geometric refractive ray tracer using NURBS surfaces
+%Version 1.3
+%written by C.Hopkins, 21OCT2020
+
+%Trace rays through a rotationally-symmetric refractive optical system. Two
+%tables of input data are required. "Surfaces" is the first table and
+%includes the system prescription. "InputRays" is the second table and
+%includes the starting position and direction of rays to be traced. Example
+%tables are included for a Double Gauss Photographic Objective. Surface
+%diameter defaults to %5 over the specified semi-aperture. Rays outside the
+%aperture of any surface are ignored.
+
+%References:
+% 1)L.Piegl and W.Tiller, The NURBS book (2nd ed.), Berlin: Springer, 1997
+% 2)J.E.Cobb, "Tiling the sphere with rational Bezier patches",UUCS-88-009,
+% 1998
+% 3)G.N.Vanderplaats, Numerical Optimization Techniques for Engineering
+% Design, MaGraw-Hill, 1984
+% 4)W.J.Smith, Modern Optical Engineering (4th ed.), McGraw-Hill, 2008
+
+%Version History
+% 1.0 21OCT2020 Initial Upload
+% 1.1 28OCT2020 Block rays that undergo total internal reflection and fixes
+% accuracy issues for rays that are close to the edge of the clear aperture
+% 1.2 04APR2021 Replaced 'sumsq' function and raised solver loop cap to 10.
+% Verified compatibility with R2015b
+% 1.3 03MAR2022 Changed array structure for wQ, wdS, & dS
+
+clear;
+%% USER INPUTS: Prescription Data & Input Ray Definition Tables
+% Note 1) lens data from Fig. 19.36 (pg. 569) of Smith
+% Note 2) for this example the ref wavelength is 588 nm
+% Note 3) set the radius of curvature for flat surface(s) to 9999
+% Columns: Radius-of-Curvature|Thickness|Semi-Aperture|Refractive Index
+Surfaces = [  9999 20.000 15.000 1.0;
+            67.080  40.000 29.000 1.689;
+            
+           -91.040 62.176 24.000 1.0
+           ];
+% Note 4) the first 3 columns of InputRays is the x,y,z starting position
+% Note 5) the last 3 columns of InputRays is the x,y,z direction vector,k
+% Note 6) make the length of the direction vector k equal to 1 for air
+%         sqrt(kX^2+kY^2+kZ^2) = 1
+% Columns: rX|rY|rZ|kX|kY|kZ
+
+InputRays = [15.0 0.0 0 0 0 1;
+14.18725862550952 4.870492038070251 0 0 0 1;
+11.837107640945904 9.213190690345018 0 0 0 1;
+8.204222371836403 12.557497173937929 0 0 0 1;
+3.6822823071119886 14.541003989089955 0 0 0 1;
+-1.238690182084984 14.948767395100047 0 0 0 1;
+-6.025431369794539 13.736599899825862 0 0 0 1;
+-10.159223574386113 11.035858660096975 0 0 0 1;
+-13.192106268097334 7.139210895556105 0 0 0 1;
+-14.795419551040835 2.4689188542110103 0 0 0 1;
+-14.795419551040837 -2.4689188542110068 0 0 0 1;
+-13.192106268097335 -7.1392108955561016 0 0 0 1;
+-10.159223574386122 -11.035858660096968 0 0 0 1;
+-6.025431369794548 -13.73659989982586 0 0 0 1;
+-1.2386901820849912 -14.948767395100047 0 0 0 1;
+3.682282307111982 -14.541003989089957 0 0 0 1;
+8.2042223718364 -12.557497173937932 0 0 0 1;
+11.8371076409459 -9.213190690345021 0 0 0 1;
+14.18725862550952 -4.870492038070256 0 0 0 1;
+15.0 -3.67394039744206e-15 0 0 0 1;
+];
+         
+%% Initialize variables
+N = size(Surfaces,1); %Number of surfaces
+M = size(InputRays,1); %Number of rays
+SR = Surfaces(:,1)'; %Spherical radius
+SA = Surfaces(:,3)'; %Semi-aperture
+RI = Surfaces(:,4)'; %Refractive index
+
+%Initialize arrays
+U = dot(InputRays(:,1:3),InputRays(:,4:6),2)'; %input phase adjustment
+U = repmat(U,[3 1 N]); %parameter array (s,u,v)
+R = repmat(InputRays(:,1:3)',[1 1 N]); %position array (x,y,z)
+K = repmat(InputRays(:,4:6)',[1 1 N]); %direction array (x,y,z)
+SurfPts = cell(1,N-1); %container for surface points
+Sag = zeros(1,N-1); %z-offset of any surf at the surf aperture
+RayFlag = ones(1,M); %switch to have solver ignore invalid rays
+rpt = [0 0 0 0]; %record max solver iteration needed for any ray/surf
+
+%Spherical-cap Control Point Data (data from Cobb)
+SQRT2 = reshape([repmat([1 sqrt(2)],[1 12]) 1],5,5);
+L1 = SQRT2.*[72 36 36 18 0;36 36 15 0 -18;36 15 0 -15 -36;
+             18 0 -15 -36 -36;0 -18 -36 -36 -72];
+L2 = @(u)SQRT2.*[72 36 48 36 72;36 27*(1-u) 12*(1-2*u) 27*(1-u) 36;
+          48 12*(1-2*u) 8*(1-6*u) 12*(1-2*u) 48;
+          36 27*(1-u) 12*(1-2*u) 27*(1-u) 36; 72 36 48 36 72];
+L = @(SA,zm) SA*[L1;flip(L1,2);sqrt((1+zm)/(1-zm))*L2(1);L2(zm)/SA];
+      
+%Basis Functions
+B = (1/16)*[1 -4 6 -4 1;4 -8 0 8 -4;6 0 -12 0 6;4 8 0 -8 -4;1 4 6 4 1];
+B4 = @(u) (B*repmat(u,5,1).^repmat((0:4)',1,numel(u)))';
+B = (1/8)*[1 -3 3 -1;3 -3 -3 3;3 3 -3 -3;1 3 3 1];
+B3 = @(u) (B*repmat(u,4,1).^repmat((0:3)',1,numel(u)))';
+
+%Affine Transform Functions      
+T = @(u,v) [u 0 0 0;0 u 0 0;0 0 u v;0 0 0 1];
+XFwd = @(A) reshape(reshape(A',5,5,4),25,4)';
+XBack = @(A) reshape(reshape(A',5,5,4),5,20)';
+XForm = @(A,u,v) XBack(T(u,v)*XFwd(A));
+
+%% Calculation Loops
+z = Surfaces(1,2); %Initialize z-coordinate
+for i = 2:N %Surface Loop
+    %Calculate Surface Control Points
+    pad = 1.05; %Increase surf dia. 5% over the CA
+    if SR(i)<9999 %Spherical Surface
+        zm = -sqrt(1-(pad*SA(i)/SR(i))^2);
+    else %Flat Surface
+        zm = -1;
+    end
+    Sag(i-1) = SR(i)*(1-sqrt(pad^2+zm^2-1)/pad);
+    wP = XForm(L(pad*SA(i),zm),SR(i)/sqrt(SR(i)^2),z);
+    %Calcluate Partial Derivative Control Points
+    wQ = 4*repmat(wP(:,2:5)-wP(:,1:4),2,1);
+    wQ(6:10,:) = -1*wQ(6:10,:);
+    
+    for j = 1:M %Ray Loop
+    if RayFlag(j) == 1 %Check if valid ray
+        r0 = R(:,j,(i-1))';
+        k0 = K(:,j,(i-1))';
+        step = (z+Sag(i-1)-r0(3))./k0(3);
+        check = r0(1:2)+step.*k0(1:2);
+        if sqrt(check*check') > SA(i)%Check aperture
+            RayFlag(j) = 0; %turn ray off
+        else
+            %Initialize parameters
+            t = [0 0 0]'; %Parameter vector (s,u,v)
+            Error_min = 1e-9; %Minimum error value to exit loop
+            for iteration = 1:10 %Surface-Ray Intersection(Newton's Method)
+                wS = B4(t(2))*reshape(wP*B4(t(3))',5,4); %4D-surf
+                S = wS(1:3)/wS(4); %3D-surface coordinate
+                r = r0 + (t(1)-U(1,j,(i-1)))*k0; %3D-position coordinate
+                if sqrt((r-S)*(r-S)') < Error_min
+                    break %exit loop
+                end
+                %Calculate surface partial derivatives
+                wdS = [B4(t(3))*reshape(wQ(1:20,:)*B3(t(2))',5,4);
+                       B4(t(2))*reshape(wQ(21:40,:)*B3(t(3))',5,4)];
+                dS = (0.5/wS(4))*wdS*[eye(3);-1*S];
+                t = t - [k0' -dS']\(r-S)';
+            end
+            %Ray Refraction
+            n = -cross(dS(1,:),dS(2,:));
+            n = n./norm(n);
+            TIRcheck = dot(n,k0)^2+RI(i)^2-RI(i-1)^2;
+            if TIRcheck < 0 %Total Internal Reflection Check
+                RayFlag(j) = 0; %turn ray off
+            else
+                k = k0+(sqrt(TIRcheck)-dot(n,k0))*n;
+            end
+            %Record values
+            K(:,j,i) = k';
+            U(:,j,i) = t;
+            R(:,j,i) = r';
+            if iteration > rpt(1)
+                rpt = [iteration i j];%record max iteration used
+            end
+        end
+    end
+    end
+    z = z + Surfaces(i,2); %update z-coordinate
+    %Calculate & store surface points for display in next section
+    A = reshape(B4(-1:0.02:1)*reshape(wP*B4(-1:0.02:1)',5,404),101,4,101);
+    A = permute(A(:,1:3,:)./repmat(A(:,end,:),[1 3 1]),[1 3 2]);
+    SurfPts(i-1) = {A};
+end
+%Evaluation plane
+step = (z-R(3,:,end))./K(3,:,end);
+R(:,:,N+1) = R(:,:,end)+repmat(step,[3 1]).*K(:,:,end);
+
+%% Spot-Diagram
+ys = [];
+zs = [];
+xs = 96;
+
+for k=1:M
+    x1 = R(3,k,3);
+    z1 = R(2,k,3);
+    y1 = R(1,k,3);
+    
+    x2 = R(3,k,4);
+    z2 = R(2,k,4);
+    y2 = R(1,k,4);
+    
+    %Equation paramétrique
+    ts = (xs-x1)/(x2-x1);
+    zs = [zs,z1 + ts*(z2-z1)];
+    ys = [ys, y1 + ts*(y2-y1)];
+end
+
+%% Plot Output
+disp(['Run Complete: ', num2str(nnz(~RayFlag)),' ray(s) blocked']);
+H = num2str(rpt);
+disp(['Max # of solver iterations: ',H(1)]);
+figure
+hold on
+for j = 1:M %Plot rays
+    if RayFlag(j) %Check if valid ray
+        plot3(squeeze(R(3,j,:)),squeeze(R(1,j,:)),squeeze(R(2,j,:)),'-r');
+    end
+end
+for i = 2:N %Plot surfaces
+    A = SurfPts{i-1};
+    n = size(A,1);
+    CO(:,:,1) = zeros(n); % red
+    CO(:,:,2) = repmat(linspace(0.5,0.6,n),[n 1]); % green
+    CO(:,:,3) = repmat(linspace(0.5,0.6,n),[n 1]); % green
+    surf(A(:,:,3),A(:,:,1),A(:,:,2),CO,'FaceAlpha',0.5,'EdgeColor','none');
+    CA(1,:) = SA(i)*cos(0:0.01:2*pi);
+    CA(2,:) = SA(i)*sin(0:0.01:2*pi);
+    CA(3,:) = (A(round(n/2,0),round(n/2,0),3)+Sag(i-1))*ones(size(CA(1,:)));
+end
+axis equal;
+xlabel('z-axis');
+ylabel('x-axis');
+zlabel('y-axis');
+hold off
+
+figure
+scatter(ys, zs)
+xlabel("ys");
+ylabel("zs")

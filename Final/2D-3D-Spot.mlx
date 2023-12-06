@@ -43,6 +43,7 @@ Surfaces = [  9999 20.000 15.000 1.0;
 %         sqrt(kX^2+kY^2+kZ^2) = 1
 % Columns: rX|rY|rZ|kX|kY|kZ
 
+
 InputRays = [15.0 0.0 0 0 0 1;
 14.18725862550952 4.870492038070251 0 0 0 1;
 11.837107640945904 9.213190690345018 0 0 0 1;
@@ -173,10 +174,77 @@ end
 step = (z-R(3,:,end))./K(3,:,end);
 R(:,:,N+1) = R(:,:,end)+repmat(step,[3 1]).*K(:,:,end);
 
+%% Meilleur Foyer
+d = [];
+xmft = linspace(80,120,500);
+
+for k=1:length(xmft)
+    di = 0;
+    for j=1:M
+        x1 = R(3,j,3);
+        z1 = R(2,j,3);
+        y1 = R(1,j,3);
+    
+        x2 = R(3,j,4);
+        z2 = R(2,j,4);
+        y2 = R(1,j,4);
+    
+        %Equation paramétrique
+        ts = (xmft(k)-x1)/(x2-x1);
+        zmf = z1 + ts*(z2-z1);
+        ymf = y1 + ts*(y2-y1);
+        di = di + sqrt(ymf^2 + zmf^2);
+    end
+    d = [d,di];
+end
+
+xmf = xmft(find(d == min(d)));
+Meilleur_Foyer = xmf
+
+%% Temps de parcours des rayons
+tl = []; %Time list
+rl = [1:M]; %Ray list
+c_velocity = 3e11; %mm/s
+
+for k=1:M
+    di = 0;
+    for j=1:3
+        if j ~= 3
+            x1 = R(3,k,j);
+            z1 = R(2,k,j);
+            y1 = R(1,k,j);
+        
+            x2 = R(3,k,j+1);
+            z2 = R(2,k,j+1);
+            y2 = R(1,k,j+1);
+    
+            di = di + sqrt((x2-x1)^2 + (y2-y1)^2 + (z2-z1)^2);
+        else
+            x1 = R(3,k,j);
+            z1 = R(2,k,j);
+            y1 = R(1,k,j);
+        
+            x2 = R(3,k,j+1);
+            z2 = R(2,k,j+1);
+            y2 = R(1,k,j+1);
+            tmf = (xmf-x1)/(x2-x1);
+            zmf = z1 + tmf*(z2-z1);
+            ymf = y1 + tmf*(y2-y1);
+    
+            di = di + sqrt((xmf-x1)^2 + (ymf-y1)^2 + (zmf-z1)^2);
+        end
+    end
+    tl = [tl, di/c_velocity];
+end
+
 %% Spot-Diagram
-ys = [];
-zs = [];
-xs = 96;
+ysr = [];
+zsr = [];
+xsr = 103;
+
+ysmf = [];
+zsmf = [];
+xsmf = xmf;
 
 for k=1:M
     x1 = R(3,k,3);
@@ -188,9 +256,24 @@ for k=1:M
     y2 = R(1,k,4);
     
     %Equation paramétrique
-    ts = (xs-x1)/(x2-x1);
-    zs = [zs,z1 + ts*(z2-z1)];
-    ys = [ys, y1 + ts*(y2-y1)];
+    tsr = (xsr-x1)/(x2-x1);
+    zsr = [zsr,z1 + tsr*(z2-z1)];
+    ysr = [ysr, y1 + tsr*(y2-y1)];
+end
+
+for k=1:M
+    x1 = R(3,k,3);
+    z1 = R(2,k,3);
+    y1 = R(1,k,3);
+    
+    x2 = R(3,k,4);
+    z2 = R(2,k,4);
+    y2 = R(1,k,4);
+    
+    %Equation paramétrique
+    tsmf = (xsmf-x1)/(x2-x1);
+    zsmf = [zsmf,z1 + tsmf*(z2-z1)];
+    ysmf = [ysmf, y1 + tsmf*(y2-y1)];
 end
 
 %% Plot Output
@@ -216,12 +299,24 @@ for i = 2:N %Plot surfaces
     CA(3,:) = (A(round(n/2,0),round(n/2,0),3)+Sag(i-1))*ones(size(CA(1,:)));
 end
 axis equal;
-xlabel('z-axis');
-ylabel('x-axis');
-zlabel('y-axis');
+xlabel('Axe z');
+ylabel('Axe x');
+zlabel('Axe y');
+title("Tracé de rayons")
 hold off
 
 figure
-scatter(ys, zs)
-xlabel("ys");
-ylabel("zs")
+hold on
+scatter(ysr, zsr, "r")
+scatter(ysmf, zsmf, "b")
+xlabel("Coordonnée y")
+ylabel("Coordonnée z")
+title("Spot-diagram du système en deux plans x")
+hold off
+
+figure
+hold on
+scatter(rl, tl, "r")
+xlabel("Numéro du rayon")
+ylabel("Temps de parcours (s)")
+title("Durée de parcours des rayons jusqu'au meilleur foyer")

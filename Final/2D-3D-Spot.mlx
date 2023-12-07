@@ -67,21 +67,18 @@ InputRays = [15.0 0.0 0 0 0 1;
 ];
          
 %% Initialize variables
-N = size(Surfaces,1); %Number of surfaces
-M = size(InputRays,1); %Number of rays
-SR = Surfaces(:,1)'; %Spherical radius
-SA = Surfaces(:,3)'; %Semi-aperture
-RI = Surfaces(:,4)'; %Refractive index
+N = size(Surfaces,1); %Nombre de surfaces
+M = size(InputRays,1); %Nombre de rayons
+SR = Surfaces(:,1)'; %Rayon de courbure
+SA = Surfaces(:,3)'; %Rayon
+RI = Surfaces(:,4)'; %Indice de réfraction
 
 %Initialize arrays
-U = dot(InputRays(:,1:3),InputRays(:,4:6),2)'; %input phase adjustment
-U = repmat(U,[3 1 N]); %parameter array (s,u,v)
-R = repmat(InputRays(:,1:3)',[1 1 N]); %position array (x,y,z)
+R = repmat(InputRays(:,1:3)',[1 1 N]); %Matrice (3,M,N) des positions des rayons
 K = repmat(InputRays(:,4:6)',[1 1 N]); %direction array (x,y,z)
 SurfPts = cell(1,N-1); %container for surface points
 Sag = zeros(1,N-1); %z-offset of any surf at the surf aperture
 RayFlag = ones(1,M); %switch to have solver ignore invalid rays
-rpt = [0 0 0 0]; %record max solver iteration needed for any ray/surf
 
 %Spherical-cap Control Point Data (data from Cobb)
 SQRT2 = reshape([repmat([1 sqrt(2)],[1 12]) 1],5,5);
@@ -90,9 +87,9 @@ L1 = SQRT2.*[72 36 36 18 0;36 36 15 0 -18;36 15 0 -15 -36;
 L2 = @(u)SQRT2.*[72 36 48 36 72;36 27*(1-u) 12*(1-2*u) 27*(1-u) 36;
           48 12*(1-2*u) 8*(1-6*u) 12*(1-2*u) 48;
           36 27*(1-u) 12*(1-2*u) 27*(1-u) 36; 72 36 48 36 72];
-L = @(SA,zm) SA*[L1;flip(L1,2);sqrt((1+zm)/(1-zm))*L2(1);L2(zm)/SA];
+L = @(SA,zm) SA*[L1;flip(L1,2);sqrt((1+zm)/(1-zm))*L2(1);L2(zm)/SA]; %La fonction L est une fonction définie précédemment dans le code et prend la semi-aperture SA(i) et la coordonnée zm comme paramètres. Elle retourne une matrice représentant les points de contrôle de la surface NURBS.
       
-%Basis Functions
+%Fonctions pour tracer les surfaces
 B = (1/16)*[1 -4 6 -4 1;4 -8 0 8 -4;6 0 -12 0 6;4 8 0 -8 -4;1 4 6 4 1];
 B4 = @(u) (B*repmat(u,5,1).^repmat((0:4)',1,numel(u)))';
 B = (1/8)*[1 -3 3 -1;3 -3 -3 3;3 3 -3 -3;1 3 3 1];
@@ -105,74 +102,65 @@ XBack = @(A) reshape(reshape(A',5,5,4),5,20)';
 XForm = @(A,u,v) XBack(T(u,v)*XFwd(A));
 
 %% Calculation Loops
-z = Surfaces(1,2); %Initialize z-coordinate
-for i = 2:N %Surface Loop
-    %Calculate Surface Control Points
-    pad = 1.05; %Increase surf dia. 5% over the CA
+z = Surfaces(1,2); %Coordonnée z de la première surface.
+for i = 2:N %Calcul des surfaces
+    %Calcul des points de controle
     if SR(i)<9999 %Spherical Surface
-        zm = -sqrt(1-(pad*SA(i)/SR(i))^2);
-    else %Flat Surface
+        zm = -sqrt(1-(SA(i)/SR(i))^2); %Calcul du point zm de la sphère à partir de l'équation d'une sphère z² = R² - x² - y²
+    else %Surface plane (R = 9999)
         zm = -1;
     end
-    Sag(i-1) = SR(i)*(1-sqrt(pad^2+zm^2-1)/pad);
-    wP = XForm(L(pad*SA(i),zm),SR(i)/sqrt(SR(i)^2),z);
-    %Calcluate Partial Derivative Control Points
+    Sag(i-1) = SR(i)*(1-sqrt(zm^2)); %Hauteur sagitale : (1-sqrt(zm^2) la distance verticale du point sur la sphère à l'axe des z (axe vertical). Multiplication par SR(i) pour échelonner cette distance par le rayon de courbure.
+    wP = XForm(L(SA(i),zm),SR(i)/sqrt(SR(i)^2),z); %wP = coordonnées des points de contrôle de la surface ; SR(i)/sqrt(SR(i)^2) : normalisation du rayon de courbure pour éviter les problèmes d'échèlles.
+    %Calcul des dérivés partiels des points de controle : C'est particulièrement utile pour déterminer le point d'intersection des rayons avec la surface en utilisant la méthode de Newton
     wQ = 4*repmat(wP(:,2:5)-wP(:,1:4),2,1);
     wQ(6:10,:) = -1*wQ(6:10,:);
     
-    for j = 1:M %Ray Loop
-    if RayFlag(j) == 1 %Check if valid ray
-        r0 = R(:,j,(i-1))';
-        k0 = K(:,j,(i-1))';
-        step = (z+Sag(i-1)-r0(3))./k0(3);
-        check = r0(1:2)+step.*k0(1:2);
-        if sqrt(check*check') > SA(i)%Check aperture
-            RayFlag(j) = 0; %turn ray off
-        else
-            %Initialize parameters
-            t = [0 0 0]'; %Parameter vector (s,u,v)
-            Error_min = 1e-9; %Minimum error value to exit loop
-            for iteration = 1:10 %Surface-Ray Intersection(Newton's Method)
-                wS = B4(t(2))*reshape(wP*B4(t(3))',5,4); %4D-surf
-                S = wS(1:3)/wS(4); %3D-surface coordinate
-                r = r0 + (t(1)-U(1,j,(i-1)))*k0; %3D-position coordinate
-                if sqrt((r-S)*(r-S)') < Error_min
-                    break %exit loop
-                end
-                %Calculate surface partial derivatives
-                wdS = [B4(t(3))*reshape(wQ(1:20,:)*B3(t(2))',5,4);
-                       B4(t(2))*reshape(wQ(21:40,:)*B3(t(3))',5,4)];
-                dS = (0.5/wS(4))*wdS*[eye(3);-1*S];
-                t = t - [k0' -dS']\(r-S)';
-            end
-            %Ray Refraction
-            n = -cross(dS(1,:),dS(2,:));
-            n = n./norm(n);
-            TIRcheck = dot(n,k0)^2+RI(i)^2-RI(i-1)^2;
-            if TIRcheck < 0 %Total Internal Reflection Check
-                RayFlag(j) = 0; %turn ray off
-            else
-                k = k0+(sqrt(TIRcheck)-dot(n,k0))*n;
-            end
-            %Record values
-            K(:,j,i) = k';
-            U(:,j,i) = t;
-            R(:,j,i) = r';
-            if iteration > rpt(1)
-                rpt = [iteration i j];%record max iteration used
-            end
-        end
+    for j = 1:M %On itère pour tous les rayons du système
+    if RayFlag(j) == 1 %Vérifie si le rayon est "valide". La définition de valide est donnée plus bas
+        r0 = R(:,j,(i-1))'; %Initialisation de la position du rayon. Pour la première itération, i=2 donc i-1 = 1 et r0 est précisement la valeur fournie dans InputRay. C'est donc un vecteur colonne (3x1).
+        k0 = K(:,j,(i-1))'; %Initialisation de la direction du rayon. De même, pour la première itération, on a la valeur donnée dans InputRay
+        step = (z+Sag(i-1)-r0(3))./k0(3); %Cette ligne calcule le pas nécessaire pour atteindre la surface optique actuelle (Sag(i-1)) depuis la position du rayon. On se base sur l'équation paramétrique r(t) = r0 + t*k0. r0(3) représente la coordonnée z du rayon. 
+        %Initialisation des paramètres
+        t = [0 0 0]'; %' pour avoir un vecteur colonne plus facilement manipulable. t(1) = s : la poisition le long du rayon ; t(2) = u et t(3) = v les paramètres de la surface. On cherche à trouver les valeurs de u,v du point d'intersection avec la surface
+        epsilon = 1e-9; %Précision souhaité pour le calcul du point d'intersection avec la surface en utilisant la méthode de Newton. 
+        for iteration = 1:10 %Point d'intersection avec la surface en utilisant la méthode de Newton. On résout l'équation r-S = 0. En version matriciel : MΔt=r-S
+             wS = B4(t(2))*reshape(wP*B4(t(3))',5,4); %B4(t(2)) donne une matrice de dimensions 5×1 basée sur les valeurs des fonctions de base B-spline pour t(2). B4(t(2)) et B4(t(3))sont utilisées pour interpoler les points de contrôle de la surface wP.  Ces valeurs servent à déterminer l'influence de chaque point de contrôle sur la position finale de la surface.
+             S = wS(1:3)/wS(4); %wS est une surface "4D" avec 3 coordonnées (x,y,z) et une quatrième coordonnées w qui n'est qu'un facteur d'échelle. Pour passer de "4D" à 3D, il suffit donc de diviser chaque composante x,y,z par w.
+             r = r0 + (t(1))*k0; %Coordoonées 3D du rayon
+             if sqrt((r-S)*(r-S)') < epsilon %sqrt((r-S)*(r-S)' permet de calculer la distance de la surface S au point r en utilisant la norme 2 habituelle de R^3. 
+                 break %On termine la recherche avant les 10 itérations
+             end
+             %Calculate surface partial derivatives
+             wdS = [B4(t(3))*reshape(wQ(1:20,:)*B3(t(2))',5,4); %Les colonnes 1 à 20 de wQ représentent les dérivées partielles par rapport à t(2)
+                    B4(t(2))*reshape(wQ(21:40,:)*B3(t(3))',5,4)];%Les colonnes 21 à 40 de wQ représentent les dérivées partielles par rapport à t(3) ; On calcul la dérivé partiel de la surface par rapport aux coordonnées u et v
+             dS = (0.5/wS(4))*wdS*[eye(3);-1*S]; %dS gradient de surface ; On combine les dérivées partielles de la surface wdS avec la position spatiale de la surface S. On utilise -S par convention mathématique
+             t = t - [k0' -dS']\(r-S)'; % [k0' -dS'] Jacobienne du problème (dérivée partielle), et on résout de manière approximé le système avec l'opérateur \.
+         end
+         %Ray Refraction
+         n = -cross(dS(1,:),dS(2,:)); %Calcul le produit vectoriel entre les dérivés partielles de dS selon u et v. Le vecteur résultant est le vecteur normal à la surface au point d'intersection.
+         n = n./norm(n); %Normalisation ||n||_2 = 1
+         TIR = dot(n,k0)^2+RI(i)^2-RI(i-1)^2; %Condition de réfraction. Si TIR<0, pas de réfraction
+         if TIR < 0 %Si TIR < 0, on ne le trace pas
+             RayFlag(j) = 0; 
+         else
+             k = k0+(sqrt(TIR)-dot(n,k0))*n; %Calcule du vecteur d'onde du rayon réfracté
+         end
+         %On enregistre les valeurs pour passer à la prochaine itération jusqu'à finir le tracé du rayon. Ensuite, on le fait pour les autres rayons
+         K(:,j,i) = k';
+         R(:,j,i) = r';
+        
     end
     end
-    z = z + Surfaces(i,2); %update z-coordinate
-    %Calculate & store surface points for display in next section
-    A = reshape(B4(-1:0.02:1)*reshape(wP*B4(-1:0.02:1)',5,404),101,4,101);
-    A = permute(A(:,1:3,:)./repmat(A(:,end,:),[1 3 1]),[1 3 2]);
-    SurfPts(i-1) = {A};
+    z = z + Surfaces(i,2); %On met à jour la valeur z pour passer à la deuxième surface
+    %Calcule et stockage des points des surfaces pour les afficher ultérièrement
+    A = reshape(B4(-1:0.02:1)*reshape(wP*B4(-1:0.02:1)',5,404),101,4,101); %On détermine les points de la surface A à partir des points wP calculés (4D)
+    A = permute(A(:,1:3,:)./repmat(A(:,end,:),[1 3 1]),[1 3 2]); %Divise les coordonnées homogènes par la composante www pour obtenir les coordonnées cartésiennes (3D)
+    SurfPts(i-1) = {A}; %On utilise une cellule pour stocker la matrice A
 end
-%Evaluation plane
-step = (z-R(3,:,end))./K(3,:,end);
-R(:,:,N+1) = R(:,:,end)+repmat(step,[3 1]).*K(:,:,end);
+%Evaluation des plans
+step = (z-R(3,:,end))./K(3,:,end); % Calcule la distance le long de la direction z (composante z des rayons) que chaque rayon doit parcourir à partir de son point d'intersection actuel jusqu'à la nouvelle surface
+R(:,:,N+1) = R(:,:,end)+repmat(step,[3 1]).*K(:,:,end); %Ajoute ce déplacement à la position actuelle des points d'intersection avec la dernière surface, mettant ainsi à jour la position des points d'intersection pour la nouvelle surface d'évaluation.
 
 %% Meilleur Foyer
 d = [];
@@ -278,8 +266,6 @@ end
 
 %% Plot Output
 disp(['Run Complete: ', num2str(nnz(~RayFlag)),' ray(s) blocked']);
-H = num2str(rpt);
-disp(['Max # of solver iterations: ',H(1)]);
 figure
 hold on
 for j = 1:M %Plot rays

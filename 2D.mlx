@@ -1,4 +1,4 @@
-
+tic
 
 % Definir les coordonnees du point source
 source = [-10, 0];
@@ -14,14 +14,15 @@ theta = linspace(angleDebut, angleFin, 100);
 xMiroir = centreMiroir(1) + rayonMiroir * cos(theta);
 yMiroir = centreMiroir(2) + rayonMiroir * sin(theta);
 
+%m/s, vitesse de la lumière dans la vide
 c = 3e8;
 
 figure;
 plot(xMiroir, yMiroir, 'k', 'LineWidth', 2);
 hold on;
 
-% Tracer les rayons du point source a l'arc de cercle concave, les rayons reflechis et les normales
-numRayons = 30;
+% Nombre de rayons tracés
+numRayons = 10;
 
 % Initialiser un vecteur pour stocker les coordonnees y des points reflechis en x = 1
 yReflechiEnX13 = zeros(1, numRayons);
@@ -75,7 +76,11 @@ for i = 1:numRayons
     b = yIntersection - m*xIntersection;
     yReflechiDroite = m*xReflechiDroite + b;
 
+
+    %Récupérer l'indice de l'élément de x le plus proche de 1.3 pour avoir
+    %x très proche de 1.3
     [~, index] = min(abs(xReflechiDroite - 1.3));
+    % On récupère y(x=1,3)
     yReflechiEnX13(i) = yReflechiDroite(index);
 
     [~, index] = min(abs(xReflechiDroite - 1.4));
@@ -107,8 +112,6 @@ axis equal;
 grid on;
 hold off;
 
-MeilleurPlan = xPlan(indexX)
-
 % Creer une nouvelle figure pour le spot diagram
 figure;
 hold on
@@ -134,17 +137,19 @@ xlabel('N° du rayon');
 grid on;
 hold off
 
+toc
+
 
 
 % Fonction pour normaliser un vecteur
-function normalizedVector = normalize(vector)
-    magnitude = norm(vector);
-    normalizedVector = vector / magnitude;
+function vecteurNormalise = normalize(vecteur)
+    norme = norm(vecteur);
+    vecteurNormalise = vecteur / norme;
 end
 
 % Fonction pour calculer la reflexion d'un vecteur par rapport a une normale
-function reflectedVector = reflect(vector, normal)
-    reflectedVector = vector - 2 * dot(vector, normal) * normal;
+function vecteurReflechi = reflect(vecteur, normal)
+    vecteurReflechi = vecteur - 2 * dot(vecteur, normal) * normal;
 end
 
 function distanceRayons=distanceRayonsEx(x, angleDebut, angleFin, numRayons, centreMiroir, rayonMiroir, source)
@@ -166,6 +171,8 @@ function distanceRayons=distanceRayonsEx(x, angleDebut, angleFin, numRayons, cen
         xReflechi = xIntersection + 2 * rayonMiroir * directionReflechie(1);
         yReflechi = yIntersection + 2 * rayonMiroir * directionReflechie(2);
         
+            % Création de la droite du rayon réfléchi connaître l'ordonnée
+            % y en tout point
         xReflechiDroite = linspace(-2, 3, 1000);
         m = (yReflechi-yIntersection)/(xReflechi-xIntersection);
         b = yIntersection - m*xIntersection;
